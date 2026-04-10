@@ -73,3 +73,69 @@ func (o *ExecutorSchema) DryRun(ctx context.Context, allImages []v2alpha1.CopyIm
 	o.Log.Info(emoji.PageFacingUp+" list of all images for mirroring in : %s", mappingTxtFilePath)
 	return nil
 }
+
+func (o *ExecutorSchema) ClusterResourcesOnly(ctx context.Context, allImages []v2alpha1.CopyImageSchema) error {
+	if len(allImages) == 0 {
+		o.Log.Info(emoji.PageFacingUp + " No images collected. Skipping cluster resources generation.")
+		return nil
+	}
+
+	o.Log.Info(emoji.PageFacingUp + " Generating cluster resources without mirroring images...")
+
+	// create cluster-resources directory and clean it (similar to the existing setupWorkingDir logic)
+	clusterResourcesPath := filepath.Join(o.Opts.Global.WorkingDir, clusterResourcesDir)
+	o.Log.Trace("creating cluster-resources directory %s", clusterResourcesPath)
+
+	if err := os.RemoveAll(clusterResourcesPath); err != nil {
+		o.Log.Error("failed to clear folder %s: %v", clusterResourcesPath, err)
+		return err
+	}
+
+	err := o.MakeDir.makeDirAll(clusterResourcesPath, 0755)
+	if err != nil {
+		o.Log.Error("setupWorkingDir for cluster resources %v", err)
+		return err
+	}
+
+	// Generate cluster resources using the collected images (assuming they would all be successfully copied)
+	forceRepositoryScope := o.Opts.Global.MaxNestedPaths > 0
+
+	// create IDMS/ITMS
+	if err := o.ClusterResources.IDMS_ITMSGenerator(allImages, forceRepositoryScope); err != nil {
+		return err
+	}
+
+	// create catalog source
+	if err := o.ClusterResources.CatalogSourceGenerator(allImages); err != nil {
+		return err
+	}
+
+	// create cluster catalog
+	if err := o.ClusterResources.ClusterCatalogGenerator(allImages); err != nil {
+		return err
+	}
+
+	// generate signature config map
+	if err := o.ClusterResources.GenerateSignatureConfigMap(allImages); err != nil {
+		// as this is not a seriously fatal error we just log the error
+		o.Log.Warn("%s", err)
+	}
+
+	// create updateService if platform.graph is enabled
+	if o.Config.Mirror.Platform.Graph {
+		graphImage, err := o.Release.GraphImage()
+		if err != nil {
+			return err
+		}
+		releaseImage, err := o.Release.ReleaseImage(ctx)
+		if err != nil {
+			return err
+		}
+		if err := o.ClusterResources.UpdateServiceGenerator(graphImage, releaseImage); err != nil {
+			return err
+		}
+	}
+
+	o.Log.Info(emoji.PageFacingUp+" Cluster resources generated in: %s", clusterResourcesPath)
+	return nil
+}

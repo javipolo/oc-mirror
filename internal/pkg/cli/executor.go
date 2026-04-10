@@ -296,6 +296,7 @@ func NewMirrorCmd(log clog.PluggableLoggerInterface) *cobra.Command {
 	// copy-only options
 	cmd.Flags().StringVar(&opts.Global.From, "from", "", "Local storage directory for disk to mirror workflow")
 	cmd.Flags().BoolVarP(&opts.IsDryRun, "dry-run", "", false, "Print actions without mirroring images")
+	cmd.Flags().BoolVarP(&opts.IsClusterResourcesOnly, "cluster-resources-only", "", false, "Generate cluster resources (IDMS, ITMS, CatalogSource, etc.) without mirroring images")
 	cmd.Flags().BoolVarP(&opts.Global.Quiet, "quiet", "q", false, "Enable detailed logging when copying images")
 	cmd.Flags().BoolVarP(&opts.Global.Force, "force", "f", false, "Force the copy and mirror functionality")
 	cmd.Flags().StringVar(&opts.Global.SinceString, "since", "", "Include all new content since specified date (format yyyy-MM-dd). When not provided, new content since previous mirroring is mirrored")
@@ -410,6 +411,9 @@ func (o ExecutorSchema) Validate(dest []string) error {
 	}
 	if strings.Contains(dest[0], consts.DockerProtocol) && o.Opts.Global.WorkingDir == "" && o.Opts.Global.From == "" {
 		return fmt.Errorf("when destination is docker://, either --from (assumes disk to mirror workflow) or --workspace (assumes mirror to mirror workflow) need to be provided")
+	}
+	if o.Opts.IsDryRun && o.Opts.IsClusterResourcesOnly {
+		return fmt.Errorf("--dry-run and --cluster-resources-only cannot be used together")
 	}
 	if strings.Contains(dest[0], consts.FileProtocol) || strings.Contains(dest[0], consts.DockerProtocol) {
 		return nil
@@ -872,6 +876,10 @@ func (o *ExecutorSchema) RunMirrorToDisk(cmd *cobra.Command, args []string) erro
 		return o.DryRun(cmd.Context(), collectorSchema.AllImages)
 	}
 
+	if o.Opts.IsClusterResourcesOnly {
+		return o.ClusterResourcesOnly(cmd.Context(), collectorSchema.AllImages)
+	}
+
 	if err := o.RebuildCatalogs(cmd.Context(), collectorSchema); err != nil {
 		return err
 	}
@@ -930,6 +938,10 @@ func (o *ExecutorSchema) RunMirrorToMirror(cmd *cobra.Command, args []string) er
 
 	if o.Opts.IsDryRun {
 		return o.DryRun(cmd.Context(), collectorSchema.AllImages)
+	}
+
+	if o.Opts.IsClusterResourcesOnly {
+		return o.ClusterResourcesOnly(cmd.Context(), collectorSchema.AllImages)
 	}
 
 	if err := o.RebuildCatalogs(cmd.Context(), collectorSchema); err != nil {
@@ -1019,6 +1031,10 @@ func (o *ExecutorSchema) RunDiskToMirror(cmd *cobra.Command, args []string) erro
 
 	if o.Opts.IsDryRun {
 		return o.DryRun(cmd.Context(), collectorSchema.AllImages)
+	}
+
+	if o.Opts.IsClusterResourcesOnly {
+		return o.ClusterResourcesOnly(cmd.Context(), collectorSchema.AllImages)
 	}
 
 	// call the batch worker
